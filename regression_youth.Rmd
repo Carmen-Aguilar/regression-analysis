@@ -1,0 +1,336 @@
+---
+title: "The regression analysis about young people leaving their parents' home"
+output: html_notebook
+---
+
+"The problem is that the mechanics of regression analysis are not the hard part; the hard part is determining which variables ought to be considered in the analysis and how can best be done," says Charles Wheelan in Naked Statistics (2012). And "adding too many variables" is not a solution, but a problem. 
+
+So I started by reading which are the "variables" that affect the decision for EU young people to leave their parents' home. Sociologists mainly point out cultural factors, the labour market, wages, unemployment rate, temporary employment.
+
+Digging into Eurostat, I could find the parameters that translate some of those factors into quantifiable information: the unemployment rate, the involuntary part-time rate, and the temporary jobs rate. However, I spent a long time looking for datasets which could represent the "cultural factors" that experts refer to, as well as the unit to compare wages among EU countries. 
+
+I found the PPS (Purchase Power Standard), a measure created by the EU to compare euros within the EU. I also include the higher education rate, the marriage age and the minimum salary per country. 
+
+<em><strong>CLARIFICATION:</strong> This exercise is part of my final project of the MA in Data Journalism that I am studying at Birmingham City University. Conclusions are not decisive.</em>
+
+# Preparing data
+
+```{r}
+youth_age <- read.csv("youth_age.csv") #Age in which young people leave home
+involuntary_part_time <- read.csv("involuntary_part_time.csv") #Percentage of young people doing involuntary part-time
+unemployment <- read.csv("unemployment.csv") #Unemployment rate
+youth_education <- read.csv("youth_education.csv") #Terciary education 
+living_parents <- read.csv("share_living_parents.csv") #Share of people living with their parents (this is part of the age) 
+temporary <- read.csv("temporary_work.csv") #Temporary jobs in young people
+low_wages <- read.csv("low_wages.csv") #Share people less than 30 earning a salary less than two thirds or less of their national median gross hourly earnings
+marriage <- read_excel("marriage.xlsx", sheet = 1) #Young people aged 16-29 who were married or in a consensual union (with or without legal basis) in 2013
+medianhourly <- read.csv("medianhourly.csv") #Median hourly salary in PPS for less than 30. 
+minimumwages <- read.csv("minimumwages.csv") #Minimum wages in PPS
+
+#Selecting one common year and the countries I want to analyse
+#Half of the datasets include up to 2017, but many of them are incompleted. That is why I change to 2016, althougth the title says 17
+
+youth_age17 <- youth_age %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)")) 
+
+part_time17 <- involuntary_part_time %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)", "European Union (15 countries)", "Euro area (18 countries)", "Euro area (17 countries)") & AGE != "From 15 to 19 years")
+
+living_parents17 <- living_parents %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)", "Euro area (18 countries)", "European Union (EU6-1972, EU9-1980, EU10-1985, EU12-1994, EU15-2004, EU25-2006, EU27-2013, EU28)", "Euro area (EA11-2000, EA12-2006, EA13-2007, EA15-2008, EA16-2010, EA17-2013, EA18-2014, EA19)", "Serbia") & AGE != "From 15 to 19 years")
+
+temporary17 <- temporary %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)", "European Union (15 countries)", "Euro area (18 countries)", "Euro area (17 countries)") & AGE != "From 15 to 19 years" & C_BIRTH != "EU15 countries except reporting country")
+
+unemployment17 <- unemployment %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)", "European Union (15 countries)", "Euro area (18 countries)", "Euro area (17 countries)") & AGE != "From 15 to 19 years")
+
+youth_education17 <- youth_education %>% filter(TIME == 2016 & SEX == "Total" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)","Euro area (18 countries)") & AGE != "From 15 to 19 years")
+
+low_wages14 <- low_wages %>% filter(TIME == 2014 & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)","Euro area (18 countries)", "Euro area (17 countries)", "Iceland", "Switzerland", "Norway", "Serbia"))
+
+marriage13 <- na.omit(marriage)
+marriage13 <- marriage13 %>% filter(!Countries %in% c("Iceland", "Switzerland", "Norway", "EU-28"))
+marriage13 <- marriage13 %>% select(Countries, Married, `Consensual union with legal basis`, `Consensual union without legal basis`) %>% mutate(Consensual = `Consensual union with legal basis`+ `Consensual union without legal basis`)
+
+medianhourly14 <- medianhourly %>% filter(TIME == 2014 & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)","Euro area (18 countries)", "Euro area (17 countries)", "Iceland", "Switzerland", "Norway", "Serbia") & AGE == "Less than 30 years")
+
+minimumwages16 <- minimumwages %>% filter(TIME == "2016S2" & !GEO %in% c("European Union (current composition)", "European Union (before the accession of Croatia)", "Montenegro", "Former Yugoslav Republic of Macedonia, the", "Turkey", "Euro area (19 countries)","Euro area (18 countries)", "Euro area (17 countries)", "Iceland", "Switzerland", "Norway", "Serbia", "United States", "Albania"))
+```
+
+
+```{r}
+class(marriage13$Consensual)
+class(medianhourly14$Value)
+```
+```{r}
+medianhourly14$Value <- as.character(medianhourly14$Value)
+medianhourly14$Value <- as.numeric(medianhourly14$Value)
+
+class(medianhourly14$Value)
+```
+
+
+Eurostat uses ":" instead of NA to inform about missing data. There are several datasets with missing values with which I will deal later. 
+
+```{r}
+youth_age17$GEO <- gsub("(until 1990 former territory of the FRG)", "", youth_age17$GEO)
+```
+
+
+# Who is young?
+
+Visualisualising the youth_age dataset, I got that the most common age for leaving the parents' home is between 25 and 30. There are, however, four countries whose age is over 30. 
+
+```{r}
+#Change the value from factor to number
+youth_age17$Value <- as.numeric(as.character(youth_age17$Value))
+hist(youth_age17$Value, xlim = c(15,35), breaks = 5, main = "Age young people leaving parents' home", xlab = "Age", ylab = "Number of EU countries")
+```
+
+```{r}
+summary(youth_age17$Value)
+sd(youth_age17$Value)
+```
+As there is no extreme values (outliers, considered any data point that lies outside the 1.5*IQR) the mean and the median is quite similar, and the "variation" or "spreadability" of this data is low. 
+
+With a box-plot I got an overview of the distribution of the ages within the 28 countries. 
+
+```{r}
+boxplot(youth_age17$Value, main = "Age for leaving home", ylab = "Age")
+```
+
+
+```{r}
+ggplot(youth_age17, aes(x = reorder(GEO, -Value), y = Value)) + geom_bar(stat = "identity", fill="darkblue", position = "dodge") + coord_flip() + geom_text(aes(label=Value), vjust=-7, size=2)+
+theme_minimal() + labs(title="Age leaving home", x="Countries", y = "Age")
+```
+
+
+# Relationship with one variable
+
+I will compare the age with the unemployment rate to see if there is any relationship. I first adapt the unemployment dataset to have one observation per country.
+
+Likewise the unemployment figures, the other datasets present the information broken-down by groups of age. I will select the 20-29 one, as the range of ages covered is more similar to the leaving-home-age. Moreover, taking into account the Bologna plan, the higher education lasts three years, until 22ish years old.
+
+```{r}
+unemployment17_20_29 <- unemployment17 %>% filter(AGE == "From 20 to 29 years" & !GEO %in% c("Iceland", "Switzerland", "Norway")) 
+unemployment17_25_29$GEO <- gsub("(until 1990 former territory of the FRG)", "", unemployment17_25_29$GEO)
+
+#From factor to numeric
+unemployment17_20_29$Value <- as.numeric(as.character(unemployment17_20_29$Value))
+youth_age17$Value <- as.numeric(as.character(youth_age17$Value))
+```
+
+
+My dependent variable (Y) is age (the event expected to change when the other variable -independent- is manipulated) and the independent (X) in this case is the unemployment ratio. I would like to know if both are related and if changing the unemployment ratio would affect the emancipation age. 
+
+
+```{r}
+plot(unemployment17_20_29$Value, youth_age17$Value, main = "Age and Unemployment", ylab = "Age", xlab = "Unemployment rate", col = "red")
+abline(lm(youth_age17$Value ~ unemployment17_20_29$Value), col = "blue")
+```
+
+I can easily see that there is no relationship. I can also calculate the correlation coefficient, a measure that suggests the dependence between two variables (between -1 and 1), and the linear model.
+
+```{r}
+cor(youth_age17$Value, unemployment17_20_29$Value)
+#Linear models
+lm(youth_age17$Value ~ unemployment17_20_29$Value)
+summary(lm(youth_age17$Value ~ unemployment17_20_29$Value))
+```
+
+Before analysing the coefficients I will do a multiple regression with the variables from the other datasets. 
+
+# Multiple regressions
+
+I will first prepare the dataset.
+
+```{r}
+part_time17_20_29 <- part_time17 %>% filter(AGE == "From 20 to 29 years" & !GEO %in% c("Iceland", "Switzerland", "Norway")) 
+
+temporary17_20_29 <- temporary17 %>% filter(AGE == "From 20 to 29 years" & !GEO %in% c("Iceland", "Switzerland", "Norway")) 
+
+youth_education17_20_29 <- youth_education17 %>% filter(AGE == "From 20 to 29 years" & !GEO %in% c("Iceland", "Switzerland", "Norway") & ISCED11 == "Tertiary education (levels 5-8)") 
+```
+
+```{r}
+class(part_time17_20_29$Value)
+class(temporary17_20_29$Value)
+class(youth_education17_20_29$Value)
+class(youth_age17$GEO)
+class(low_wages14$Value)
+```
+
+```{r}
+part_time17_20_29$Value <- as.numeric(as.character(part_time17_20_29$Value))
+temporary17_20_29$Value <- as.numeric(as.character(temporary17_20_29$Value))
+youth_education17_20_29$Value <- as.numeric(as.character(youth_education17_20_29$Value))
+```
+
+```{r}
+low_wages14$Value <- as.numeric(as.character(low_wages14$Value))
+minimumwages16$Value <- as.character(minimumwages16$Value)
+minimumwages16$Value <- as.numeric(gsub(",", "",minimumwages16$Value))
+```
+
+
+```{r}
+class(part_time17_20_29$Value)
+class(temporary17_20_29$Value)
+class(youth_education17_20_29$Value)
+class(low_wages14$Value)
+class(minimumwages16$Value)
+```
+
+```{r}
+youthMR <- youth_age17 %>% select(GEO, Value)
+colnames(youthMR)[2]<- "Age_leaving"
+unemploymentMR <- unemployment17_20_29 %>% select(GEO, Value)
+colnames(unemploymentMR)[2]<- "Unemployment_rate"
+partTimeMR <- part_time17_20_29 %>% select(GEO, Value)
+colnames(partTimeMR)[2]<- "Involuntary_partTime"
+temporaryMR <- temporary17_20_29 %>% select(GEO, Value)
+colnames(temporaryMR)[2]<- "Temporary_job"
+educationMR <- youth_education17_20_29 %>% select(GEO, Value) 
+colnames(educationMR)[2] <- "Terciary_education"
+lowwagesMR <- low_wages14 %>% select(GEO, Value)
+colnames(lowwagesMR)[2] <- "Share_low_wages"
+marriageMR <- marriage13 %>% select(Countries, Married, Consensual)
+colnames(marriageMR)[1]<- "GEO"
+medianhourlyMR <- medianhourly14 %>% select(GEO, Value)
+colnames(medianhourlyMR)[2]<- "Median_hourly"
+minimumwageMR <- minimumwages16 %>% select(GEO,Value) 
+colnames(minimumwageMR)[2] <- "Minimum_wage"
+```
+
+Creating a single dataframe
+
+```{r}
+newdata <- cbind(youthMR, unemploymentMR, partTimeMR, temporaryMR, educationMR, lowwagesMR, medianhourlyMR, minimumwageMR)
+colnames(newdata)
+newdata <- newdata[,c(1,2,4,6,8,10,12,14,16)]
+newdata$GEO <- gsub("(until 1990 former territory of the FRG)", "", newdata$GEO)
+newdata$GEO <- gsub(" ()","", newdata$GEO)
+```
+
+```{r}
+newdata$GEO
+```
+```{r}
+marriageMR$GEO <- gsub("Germany","Germany()", marriageMR$GEO)
+marriageMR$GEO <- gsub("Czech Republic","CzechRepublic", marriageMR$GEO)
+marriageMR$GEO <- gsub("United Kingdom","UnitedKingdom", marriageMR$GEO)
+marriageMR$GEO 
+```
+
+
+```{r}
+newdata <- merge(newdata, marriageMR, by = "GEO")
+```
+
+Once I have a single dataframe with all the information, I plot the data to see relationship between the variables. 
+
+
+```{r}
+newdata_plot <- newdata %>% select(Age_leaving, Unemployment_rate, Involuntary_partTime, Temporary_job, Terciary_education, Share_low_wages, Median_hourly, Married, Consensual)
+```
+
+
+```{r}
+plot(newdata_plot, pch=1, col = "orange", main = "Relationship between variables Youth leaving home")
+```
+The plot above shows the relationship among every variable. However, I am interested in how each of those variables affect the "Age_leaving_home." Hence, I use the correlation coeffient. 
+
+```{r}
+newdata$Age_leaving <- as.numeric(as.character(newdata$Age_leaving))
+cor(newdata$Age_leaving, newdata$Unemployment_rate)
+cor(newdata$Age_leaving, newdata$Involuntary_partTime, use = "complete.obs") # "use complete.obs" to avoid NA values
+cor(newdata$Age_leaving, newdata$Temporary_job)
+cor(newdata$Age_leaving, newdata$Terciary_education)
+cor(newdata$Age_leaving, newdata$Share_low_wages)
+cor(newdata$Age_leaving, newdata$Median_hourly)
+cor(newdata$Age_leaving, newdata$Married)
+cor(newdata$Age_leaving, newdata$Consensual)
+```
+
+It goes from -1 to 1.
+0 means no correlation. But the figure that shows a "strong" correlation varies depending on the author. 
+<a href="http://www.statstutor.ac.uk/resources/uploaded/pearsons.pdf">This tutorial from Statstutor</a> considers a "strong correlagion" from 0.6, while the <a href="https://www.dummies.com/education/math/statistics/how-to-interpret-a-correlation-coefficient-r/">website Dummies</a> sets that limit in 0.7, and <a href="https://explorable.com/statistical-correlation">Explorable</a> in 0.5. 
+
+I can conclude that the median hourly and the marriage age are strong correlated with the age of leaving home. 
+
+I run now the multiple regression and use the summary function to print the output.
+
+
+```{r}
+newdata <- newdata %>% filter(!GEO %in% c("Lithuania", "Estonia")) #Cleaning uncompleted countries to avoid distorsions. The regression analysis warns you that you have missing data. For the purpose of this exercise I exclude the two countries with incompleted information. 
+summary(lm(Age_leaving ~ Involuntary_partTime + Unemployment_rate + Temporary_job + Terciary_education + Share_low_wages + Median_hourly + Married + Consensual, data = newdata, na.action = "na.omit"))
+```
+```{r}
+format(4.40e-05, scientific = FALSE)
+format(4.255e-05, scientific = FALSE)
+```
+
+## Interpreting the coefficients
+
+According to Naked statistics' author, "for any regression coefficient, you will be generally interested in three things: sign, size, and significance."
+
+<strong>Sign</strong>: positive or negative. It tells you the direction of the relationship. 
+
+<strong>Size</strong>: The number that says how big the relationship is. It means that if the independent variable (all the one I have tested) changes one (the unit depends on the variable's unit), the dependent one would change the number of the coefficient for this variable. 
+
+For example: if the unemployment rate increases one percentage point (because my variable is in percentage), the age at which people leave their parents' home would increase by 0.168 years. If it will increase by two percentages points, the dependent variable (age) would rise two times 0.168. 
+
+The formula (written in my way) is:
+
+DEPENDENT VARIABLE = INTERCEPT + COEFFICIENT_FIRST_INDEPENDENT_VARIABLE*CHANGE_IN_INDEPENDENT_VARIABLE +  COEFFICIENT_SECOND_INDEPENDENT_VARIABLE*CHANGE_IN_INDEPENDENT_VARIABLE...
+
+AGE = 36.4868125 + (-0.0244483)*1 + 0.1676701*1 + ...
+
+<strong>Significance</strong>: The p-value. Each independent variable has a p-value ("Pr(>|t|"). If it is under 0.05 is considered "statistically significant" and we can "reject the null hypothesis," or in other words, consider that there is a relationship between the independent variable and the dependent variable. In my case, I've got three variables that meet that requirement. 
+
+But there are other parameters to test my model and the results. 
+
+- R square: How much of the variation of my dependent variable (age) is explained by those independent variables I have used. As it is a multiple regression, I used the adjusted number (80.21%).
+
+- F-Statistic: If the R square measure the "strength" of the relationship, the F-Statistic tells you whether that relationship is "statistically significant," explained <a href= "http://analyticspro.org/2016/03/15/r-tutorial-how-to-interpret-f-statistic-in-regression-models/", target="_blank">Shantanu Deu</a>. The further from 1, the better. But there is another test to judge this number. 
+
+"You should not reject the null if your critical f value is smaller than your F Value, unless you also have a small p-value," says in the blog <a href="http://www.statisticshowto.com/probability-and-statistics/f-statistic-value-test/", target="_blank">Statistics How To</a>.
+The critical f value is what R prints as F-Statistic. The f value can be calculated with <a href="http://www.statisticshowto.com/tables/f-table/", target="_blank">this table</a>, using the numbers that follow the F-Statistic in R. 
+In my case 12.14 < 2.69. So I can reject the null hypothesis (my variables affect the age).
+
+- P-value: The one that is in the last line tells whether the group of variables is "statistically significant."
+
+- Standard Error (SE): This acts as the standard deviation. So, following the 68-95-99 rule, in 95 out of 100 times, the coefficients would be within two SE. My 95% confidence interval for the marriage variable is -.33 and -.31. 95 times out of 100 (or 19 in 20) the true population parameter will be between those two values. Those are also no equal to 0, so I can reject the null hypothesis that there is no association between age for leaving home and the age of marriage. 
+
+# Conclussion
+
+As Charles Wheelan warned, running a regression is easy. The difficulties come with selecting the parameters, testing your models and understanding the results. 
+
+After reflecting on the parameters, the assessment of my model tells me that all the parameters together are related to the age at which young people leave home. Mainly, I look at the three "statistically significant."  
+
+```{r}
+plot(newdata$Consensual, newdata$Age_leaving ,main = "Age and Consensual unions", xlab = "Percentage of consensual unions > 30", ylab = "Age for leaving home", col = "orange")
+abline(lm(newdata$Age_leaving ~ newdata$Consensual), col = "blue")
+```
+
+```{r}
+plot(newdata$Median_hourly, newdata$Age_leaving ,main = "Age and Median hourly salary", xlab = "Median Hourly salary in PPS", ylab = "Age for leaving home", col = "orange")
+abline(lm(newdata$Age_leaving ~ newdata$Median_hourly), col = "blue")
+```
+
+```{r}
+plot(newdata$Share_low_wages, newdata$Age_leaving ,main = "Age and low salaries", xlab = "Share of 20 - 29 earning less than 2/3 of median gross hourly earnings (PPS)", ylab = "Age for leaving home", col = "orange")
+abline(lm(newdata$Age_leaving ~ newdata$Share_low_wages), col = "blue")
+```
+
+# Some warnings:
+- Quality of the data and the sample. I took the information from Eurostat, as it is the best option to compare between European countries. 
+- There may be confounders that can affect the results of the regression, such as the type of jobs, the financial situations by countries. Hence, further investigation is needed to adjust/correct for those variables. 
+
+Bibliography used:
+Wheelan, C. (2012) Naked statistics: stripping the dread from the data. New York: W. W. Norton Company
+
+Rego, F. (2015) Quick guide: interpreting simple linear model output in R, Felipe Rego [blog] Oct 23. Available at: https://feliperego.github.io/blog/2015/10/23/Interpreting-Model-Output-In-R [Accessed June 25]
+
+Statistics How To (2018) F Statistic / F Value: Simple Definition and Interpretation, Statistics How To, June 25 Available at: http://www.statisticshowto.com/probability-and-statistics/f-statistic-value-test/ [Accessed July 10]
+
+Flowing Data (2008) How to Read and Use a Box-and-Whisker Plot. Available at: https://flowingdata.com/2008/02/15/how-to-read-and-use-a-box-and-whisker-plot/ [Accessed July 8]
+
+Prabhakaran, S. (n.d.) Linear regression, R-statistics. Available at: http://r-statistics.co/Linear-Regression.html [Accessed July 8]
